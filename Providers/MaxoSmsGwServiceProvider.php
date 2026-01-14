@@ -3,6 +3,7 @@
 namespace Modules\MaxoSmsGw\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Mail\Events\MessageSending;
 use App\Conversation;
 
 define('MAXOSMSGW_MODULE', 'maxosmsgw');
@@ -15,6 +16,7 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
     {
         $this->registerConfig();
         $this->registerHooks();
+        $this->registerMailListener();
     }
 
     public function register()
@@ -97,37 +99,87 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
             return $subject;
         }, 20, 3);
 
-        // Replace the entire email body for SMS gateway - removes template chrome
-        \Eventy::addFilter('email.reply_to_customer.swiftmessage', function ($message, $from_alias, $thread, $mailbox) {
-            $conversation = $thread->conversation ?? null;
-            $customer = $conversation->customer ?? null;
+    }
 
-            if (!$customer || !$this->isFromSmsGateway($customer->email ?? '')) {
-                return $message;
+    /**
+     * Register Laravel Mail event listener to intercept ALL outgoing emails
+     */
+    protected function registerMailListener()
+    {
+        $this->app['events']->listen(MessageSending::class, function (MessageSending $event) {
+            $message = $event->message;
+
+            // Get recipient email(s) - handle both SwiftMailer and Symfony Mailer
+            $recipients = [];
+            if (method_exists($message, 'getTo')) {
+                $to = $message->getTo();
+                foreach ($to as $address) {
+                    if (is_object($address) && method_exists($address, 'getAddress')) {
+                        $recipients[] = $address->getAddress();
+                    } elseif (is_string($address)) {
+                        $recipients[] = $address;
+                    } else {
+                        // SwiftMailer returns array with email => name
+                        $recipients[] = is_array($to) ? key($to) : $address;
+                    }
+                }
             }
 
-            // Get the CURRENT rendered body from the message (includes template)
-            $currentBody = $message->getBody();
-
-            // Strip it down to just the reply text
-            $plainText = $this->stripToPlainText($currentBody);
-
-            // If that didn't work well, fall back to thread body
-            if (empty($plainText)) {
-                $plainText = $this->stripToPlainText($thread->body ?? '');
+            if (empty($recipients)) {
+                return;
             }
 
-            // Replace the entire body with just the plain text
-            $message->setBody($plainText, 'text/plain');
-
-            // Remove any HTML/alternative parts
-            $children = $message->getChildren();
-            foreach ($children as $child) {
-                $message->detach($child);
+            // Check if any recipient is from SMS gateway
+            $isSmsGateway = false;
+            foreach ($recipients as $email) {
+                if ($this->isFromSmsGateway($email)) {
+                    $isSmsGateway = true;
+                    break;
+                }
             }
 
-            return $message;
-        }, 20, 4);
+            if (!$isSmsGateway) {
+                return;
+            }
+
+            // Try to get the email body content
+            $content = '';
+
+            // Symfony Mailer (Email object)
+            if (method_exists($message, 'getHtmlBody')) {
+                $content = $message->getHtmlBody() ?? '';
+            }
+            if (empty($content) && method_exists($message, 'getTextBody')) {
+                $content = $message->getTextBody() ?? '';
+            }
+
+            // SwiftMailer fallback
+            if (empty($content) && method_exists($message, 'getBody')) {
+                $body = $message->getBody();
+                $content = is_string($body) ? $body : '';
+            }
+
+            // Strip to plain text
+            $plainText = $this->stripToPlainText($content);
+
+            // Replace the body with plain text only
+            // Symfony Mailer (Laravel 9+)
+            if (method_exists($message, 'text') && method_exists($message, 'html')) {
+                $message->text($plainText);
+                $message->html(null); // Remove HTML body
+            }
+            // SwiftMailer (Laravel 5-8)
+            elseif (method_exists($message, 'setBody')) {
+                $message->setBody($plainText, 'text/plain');
+                if (method_exists($message, 'getChildren')) {
+                    foreach ($message->getChildren() as $child) {
+                        $message->detach($child);
+                    }
+                }
+            }
+
+            \Log::info('MaxoSmsGw: Processed SMS email to ' . implode(', ', $recipients) . ' - Body length: ' . strlen($plainText));
+        });
     }
 
     /**
