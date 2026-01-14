@@ -96,6 +96,30 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
 
             return $subject;
         }, 20, 3);
+
+        // Replace the entire email body for SMS gateway - removes template chrome
+        \Eventy::addFilter('email.reply_to_customer.swiftmessage', function ($message, $from_alias, $thread, $mailbox) {
+            $conversation = $thread->conversation ?? null;
+            $customer = $conversation->customer ?? null;
+
+            if (!$customer || !$this->isFromSmsGateway($customer->email ?? '')) {
+                return $message;
+            }
+
+            // Get just the plain text reply
+            $plainText = $this->stripToPlainText($thread->body ?? '');
+
+            // Replace the entire body with just the plain text
+            $message->setBody($plainText, 'text/plain');
+
+            // Remove any HTML parts
+            $children = $message->getChildren();
+            foreach ($children as $child) {
+                $message->detach($child);
+            }
+
+            return $message;
+        }, 20, 4);
     }
 
     /**
