@@ -101,6 +101,68 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
             return $subject;
         }, 20, 3);
 
+        // Hook into SwiftMessage directly - this is the most reliable way
+        \Eventy::addAction('email.reply_to_customer.swiftmessage', function ($swiftmessage, $from_alias, $thread, $mailbox) {
+            try {
+                // Get recipient email
+                $to = $swiftmessage->getTo();
+                if (!is_array($to)) {
+                    return;
+                }
+
+                $recipients = array_keys($to);
+                $isSmsGateway = false;
+                foreach ($recipients as $email) {
+                    if ($this->isFromSmsGateway($email)) {
+                        $isSmsGateway = true;
+                        break;
+                    }
+                }
+
+                if (!$isSmsGateway) {
+                    return;
+                }
+
+                \Log::error('MaxoSmsGw: SwiftMessage hook - SMS gateway recipient: ' . implode(', ', $recipients));
+
+                // Get the body content
+                $content = $swiftmessage->getBody();
+
+                // Check for HTML alternative parts
+                $children = $swiftmessage->getChildren();
+                foreach ($children as $child) {
+                    if (method_exists($child, 'getContentType') &&
+                        strpos($child->getContentType(), 'text/html') !== false) {
+                        $content = $child->getBody();
+                        break;
+                    }
+                }
+
+                \Log::error('MaxoSmsGw: Original body length: ' . strlen($content));
+
+                // Strip to plain text
+                $plainText = $this->stripToPlainText($content);
+
+                \Log::error('MaxoSmsGw: Stripped body: ' . substr($plainText, 0, 200));
+
+                // Set body as plain text
+                $swiftmessage->setBody($plainText, 'text/plain');
+
+                // Remove all child parts (HTML alternatives)
+                foreach ($children as $child) {
+                    $swiftmessage->detach($child);
+                }
+
+                // Set content type
+                $swiftmessage->setContentType('text/plain');
+
+                \Log::error('MaxoSmsGw: SwiftMessage modified successfully');
+
+            } catch (\Exception $e) {
+                \Log::error('MaxoSmsGw: SwiftMessage hook error: ' . $e->getMessage());
+            }
+        }, 20, 4);
+
     }
 
     /**
