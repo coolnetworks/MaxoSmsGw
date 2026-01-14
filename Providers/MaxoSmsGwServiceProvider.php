@@ -125,35 +125,48 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
 
                 \Log::error('MaxoSmsGw: SwiftMessage hook - SMS gateway recipient: ' . implode(', ', $recipients));
 
-                // Get the body content
-                $content = $swiftmessage->getBody();
-
-                // Check for HTML alternative parts
-                $children = $swiftmessage->getChildren();
-                foreach ($children as $child) {
-                    if (method_exists($child, 'getContentType') &&
-                        strpos($child->getContentType(), 'text/html') !== false) {
-                        $content = $child->getBody();
-                        break;
-                    }
+                // Get the actual reply body from the thread object
+                $plainText = '';
+                if ($thread && isset($thread->body)) {
+                    $plainText = $this->stripToPlainText($thread->body);
                 }
 
-                \Log::error('MaxoSmsGw: Original body length: ' . strlen($content));
+                // If thread body is empty, try to extract from SwiftMessage
+                if (empty($plainText)) {
+                    $content = '';
+                    $children = $swiftmessage->getChildren();
 
-                // Strip to plain text
-                $plainText = $this->stripToPlainText($content);
+                    // Look for HTML part first
+                    foreach ($children as $child) {
+                        if (method_exists($child, 'getContentType')) {
+                            $contentType = $child->getContentType();
+                            if (strpos($contentType, 'text/html') !== false) {
+                                $content = $child->getBody();
+                                break;
+                            }
+                        }
+                    }
 
-                \Log::error('MaxoSmsGw: Stripped body: ' . substr($plainText, 0, 200));
+                    // If no HTML found in children, try main body
+                    if (empty($content)) {
+                        $content = $swiftmessage->getBody();
+                    }
 
-                // Set body as plain text
+                    $plainText = $this->stripToPlainText($content);
+                }
+
+                \Log::error('MaxoSmsGw: Final plain text: ' . substr($plainText, 0, 300));
+
+                // Set body as plain text only
                 $swiftmessage->setBody($plainText, 'text/plain');
 
-                // Remove all child parts (HTML alternatives)
+                // Remove all child parts (HTML alternatives, etc.)
+                $children = $swiftmessage->getChildren();
                 foreach ($children as $child) {
                     $swiftmessage->detach($child);
                 }
 
-                // Set content type
+                // Set content type to plain text
                 $swiftmessage->setContentType('text/plain');
 
                 \Log::error('MaxoSmsGw: SwiftMessage modified successfully');
