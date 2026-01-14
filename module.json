@@ -3,8 +3,15 @@
     "alias": "maxosmsgw",
     "description": "Handles SMS gateway emails from voipportal.com.au - prevents auto-replies and strips signatures/history from outgoing replies",
     "version": "1.0.0",
-    "detached": false,
+    "author": "Coolnetworks",
+    "license": "MIT",
+    "keywords": [],
+    "active": 1,
+    "order": 0,
     "providers": [
         "Modules\\MaxoSmsGw\\Providers\\MaxoSmsGwServiceProvider"
-    ]
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": []
 }
