@@ -1,0 +1,10 @@
+{
+    "name": "coolnetworks/maxosmsgw",
+    "description": "FreeScout module for SMS gateway email handling",
+    "type": "freescout-module",
+    "autoload": {
+        "psr-4": {
+            "Modules\\MaxoSmsGw\\": ""
+        }
+    }
+}
