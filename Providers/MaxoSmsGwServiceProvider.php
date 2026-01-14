@@ -109,86 +109,86 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
     protected function registerMailListener()
     {
         $this->app['events']->listen(MessageSending::class, function (MessageSending $event) {
-            \Log::info('MaxoSmsGw: MessageSending event triggered');
-            $message = $event->message;
+            try {
+                $message = $event->message;
 
-            // Get recipient email(s) - handle both SwiftMailer and Symfony Mailer
-            $recipients = [];
-            if (method_exists($message, 'getTo')) {
-                $to = $message->getTo();
-                \Log::info('MaxoSmsGw: getTo returned: ' . json_encode($to));
-                foreach ($to as $address) {
-                    if (is_object($address) && method_exists($address, 'getAddress')) {
-                        $recipients[] = $address->getAddress();
-                    } elseif (is_string($address)) {
-                        $recipients[] = $address;
-                    } else {
-                        // SwiftMailer returns array with email => name
-                        $recipients[] = is_array($to) ? key($to) : $address;
+                // Get recipient email(s) - SwiftMailer returns array of email => name
+                $recipients = [];
+                if (method_exists($message, 'getTo')) {
+                    $to = $message->getTo();
+                    if (is_array($to)) {
+                        // SwiftMailer: array keys are email addresses
+                        $recipients = array_keys($to);
                     }
                 }
-            }
 
-            \Log::info('MaxoSmsGw: Recipients parsed: ' . json_encode($recipients));
-
-            if (empty($recipients)) {
-                \Log::info('MaxoSmsGw: No recipients found, exiting');
-                return;
-            }
-
-            // Check if any recipient is from SMS gateway
-            $isSmsGateway = false;
-            foreach ($recipients as $email) {
-                if ($this->isFromSmsGateway($email)) {
-                    $isSmsGateway = true;
-                    break;
+                if (empty($recipients)) {
+                    return;
                 }
-            }
 
-            if (!$isSmsGateway) {
-                \Log::info('MaxoSmsGw: Not an SMS gateway recipient, skipping');
-                return;
-            }
+                // Check if any recipient is from SMS gateway
+                $isSmsGateway = false;
+                foreach ($recipients as $email) {
+                    if ($this->isFromSmsGateway($email)) {
+                        $isSmsGateway = true;
+                        break;
+                    }
+                }
 
-            \Log::info('MaxoSmsGw: SMS gateway recipient detected, processing...');
+                if (!$isSmsGateway) {
+                    return;
+                }
 
-            // Try to get the email body content
-            $content = '';
+                \Log::error('MaxoSmsGw: SMS gateway recipient detected: ' . implode(', ', $recipients));
 
-            // Symfony Mailer (Email object)
-            if (method_exists($message, 'getHtmlBody')) {
-                $content = $message->getHtmlBody() ?? '';
-            }
-            if (empty($content) && method_exists($message, 'getTextBody')) {
-                $content = $message->getTextBody() ?? '';
-            }
+                // Get the email body content (SwiftMailer)
+                $content = '';
+                if (method_exists($message, 'getBody')) {
+                    $content = $message->getBody();
+                }
 
-            // SwiftMailer fallback
-            if (empty($content) && method_exists($message, 'getBody')) {
-                $body = $message->getBody();
-                $content = is_string($body) ? $body : '';
-            }
-
-            // Strip to plain text
-            $plainText = $this->stripToPlainText($content);
-
-            // Replace the body with plain text only
-            // Symfony Mailer (Laravel 9+)
-            if (method_exists($message, 'text') && method_exists($message, 'html')) {
-                $message->text($plainText);
-                $message->html(null); // Remove HTML body
-            }
-            // SwiftMailer (Laravel 5-8)
-            elseif (method_exists($message, 'setBody')) {
-                $message->setBody($plainText, 'text/plain');
+                // Also check for HTML alternative parts
                 if (method_exists($message, 'getChildren')) {
                     foreach ($message->getChildren() as $child) {
-                        $message->detach($child);
+                        if (method_exists($child, 'getContentType') &&
+                            strpos($child->getContentType(), 'text/html') !== false) {
+                            $content = $child->getBody();
+                            break;
+                        }
                     }
                 }
-            }
 
-            \Log::info('MaxoSmsGw: Processed SMS email to ' . implode(', ', $recipients) . ' - Body length: ' . strlen($plainText));
+                \Log::error('MaxoSmsGw: Original content length: ' . strlen($content));
+
+                // Strip to plain text
+                $plainText = $this->stripToPlainText($content);
+
+                \Log::error('MaxoSmsGw: Stripped content: ' . substr($plainText, 0, 200));
+
+                // Replace the body with plain text only (SwiftMailer)
+                if (method_exists($message, 'setBody')) {
+                    // Set body as plain text
+                    $message->setBody($plainText, 'text/plain');
+
+                    // Remove all child parts (HTML alternatives, attachments, etc.)
+                    if (method_exists($message, 'getChildren')) {
+                        $children = $message->getChildren();
+                        foreach ($children as $child) {
+                            $message->detach($child);
+                        }
+                    }
+
+                    // Also set content type header explicitly
+                    if (method_exists($message, 'setContentType')) {
+                        $message->setContentType('text/plain');
+                    }
+                }
+
+                \Log::error('MaxoSmsGw: Processed SMS email successfully');
+
+            } catch (\Exception $e) {
+                \Log::error('MaxoSmsGw: Error processing email: ' . $e->getMessage());
+            }
         });
     }
 
