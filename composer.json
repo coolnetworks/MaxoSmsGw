@@ -1,7 +1,22 @@
 {
     "name": "coolnetworks/maxosmsgw",
     "description": "FreeScout module for SMS gateway email handling",
-    "type": "freescout-module",
+    "authors": [
+        {
+            "name": "Coolnetworks",
+            "email": "support@coolnetworks.com.au"
+        }
+    ],
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Modules\\MaxoSmsGw\\Providers\\MaxoSmsGwServiceProvider"
+            ],
+            "aliases": {
+
+            }
+        }
+    },
     "autoload": {
         "psr-4": {
             "Modules\\MaxoSmsGw\\": ""
