@@ -14,9 +14,11 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
 
     public function boot()
     {
+        \Log::info('MaxoSmsGw: Module booting...');
         $this->registerConfig();
         $this->registerHooks();
         $this->registerMailListener();
+        \Log::info('MaxoSmsGw: Module boot complete, mail listener registered');
     }
 
     public function register()
@@ -107,12 +109,14 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
     protected function registerMailListener()
     {
         $this->app['events']->listen(MessageSending::class, function (MessageSending $event) {
+            \Log::info('MaxoSmsGw: MessageSending event triggered');
             $message = $event->message;
 
             // Get recipient email(s) - handle both SwiftMailer and Symfony Mailer
             $recipients = [];
             if (method_exists($message, 'getTo')) {
                 $to = $message->getTo();
+                \Log::info('MaxoSmsGw: getTo returned: ' . json_encode($to));
                 foreach ($to as $address) {
                     if (is_object($address) && method_exists($address, 'getAddress')) {
                         $recipients[] = $address->getAddress();
@@ -125,7 +129,10 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
                 }
             }
 
+            \Log::info('MaxoSmsGw: Recipients parsed: ' . json_encode($recipients));
+
             if (empty($recipients)) {
+                \Log::info('MaxoSmsGw: No recipients found, exiting');
                 return;
             }
 
@@ -139,8 +146,11 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
             }
 
             if (!$isSmsGateway) {
+                \Log::info('MaxoSmsGw: Not an SMS gateway recipient, skipping');
                 return;
             }
+
+            \Log::info('MaxoSmsGw: SMS gateway recipient detected, processing...');
 
             // Try to get the email body content
             $content = '';
