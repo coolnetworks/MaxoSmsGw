@@ -144,9 +144,12 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
             return '';
         }
 
-        // Remove "Please reply above this line" separator and everything after
+        // Remove "Please reply above this line" separator and everything after (various formats)
         $html = preg_replace('/(<br\s*\/?>|\n)*--\s*Please reply above this line\s*--.*$/is', '', $html);
         $html = preg_replace('/(<br\s*\/?>|\n)*-+\s*Please reply above this line\s*-+.*$/is', '', $html);
+        $html = preg_replace('/(<br\s*\/?>|\n)*[-─—]+\s*Please reply above this line\s*[-─—]+.*$/is', '', $html);
+        $html = preg_replace('/.*Please reply above this line.*$/im', '', $html);
+        $html = preg_replace('/.*reply above this line.*$/im', '', $html);
 
         // Remove signature blocks (common patterns)
         // -- signature delimiter
@@ -188,6 +191,11 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
 
         // Remove ticket numbers like [#123], (#123), #123, Ticket #123, etc.
         $text = $this->stripTicketNumber($text);
+
+        // Final cleanup - remove any remaining "reply above this line" text (plain text version)
+        $text = preg_replace('/.*[Pp]lease reply above this line.*(\n|$)/m', '', $text);
+        $text = preg_replace('/.*[Rr]eply above this line.*(\n|$)/m', '', $text);
+        $text = preg_replace('/^[-─—\s]+$/m', '', $text);
 
         // Trim
         $text = trim($text);
