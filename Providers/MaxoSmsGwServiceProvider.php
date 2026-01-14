@@ -106,13 +106,21 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
                 return $message;
             }
 
-            // Get just the plain text reply
-            $plainText = $this->stripToPlainText($thread->body ?? '');
+            // Get the CURRENT rendered body from the message (includes template)
+            $currentBody = $message->getBody();
+
+            // Strip it down to just the reply text
+            $plainText = $this->stripToPlainText($currentBody);
+
+            // If that didn't work well, fall back to thread body
+            if (empty($plainText)) {
+                $plainText = $this->stripToPlainText($thread->body ?? '');
+            }
 
             // Replace the entire body with just the plain text
             $message->setBody($plainText, 'text/plain');
 
-            // Remove any HTML parts
+            // Remove any HTML/alternative parts
             $children = $message->getChildren();
             foreach ($children as $child) {
                 $message->detach($child);
