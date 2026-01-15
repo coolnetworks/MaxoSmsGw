@@ -2,7 +2,7 @@
     "name": "Maxo SMS Gateway",
     "alias": "maxosmsgw",
     "description": "Handles SMS gateway emails from voipportal.com.au - prevents auto-replies and strips signatures/history from outgoing replies",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "author": "Coolnetworks",
     "license": "MIT",
     "keywords": [],
