@@ -5,6 +5,7 @@ namespace Modules\MaxoSmsGw\Providers;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Mail\Events\MessageSending;
 use App\Conversation;
+use App\Thread;
 
 define('MAXOSMSGW_MODULE', 'maxosmsgw');
 
@@ -178,6 +179,29 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
                 \Log::error('MaxoSmsGw: SwiftMessage hook error: ' . $e->getMessage());
             }
         }, 20, 4);
+
+        // Thread SMS conversations and strip confirmation boilerplate
+        \Eventy::addFilter('fetch_emails.data_to_save', function ($data) {
+            $from = $data['from'] ?? '';
+
+            if (!$this->isFromSmsGateway($from)) {
+                return $data;
+            }
+
+            // Strip outbound confirmation boilerplate
+            $data['body'] = $this->stripSmsConfirmation($data['body'] ?? '');
+
+            // Thread into existing conversation if FreeScout didn't match headers
+            if (empty($data['prev_thread'])) {
+                $prev = $this->findExistingSmsThread($from);
+                if ($prev) {
+                    $data['prev_thread'] = $prev;
+                    \Log::info('MaxoSmsGw: Threading into existing conversation #' . $prev->conversation_id . ' for ' . $from);
+                }
+            }
+
+            return $data;
+        }, 20, 1);
 
     }
 
@@ -393,5 +417,52 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
         $text = trim($text);
 
         return $text;
+    }
+
+    /**
+     * Find the latest thread in an existing SMS conversation for threading.
+     */
+    protected function findExistingSmsThread($smsEmail)
+    {
+        $conversation = Conversation::where('customer_email', $smsEmail)
+            ->where('status', '!=', Conversation::STATUS_SPAM)
+            ->where('state', Conversation::STATE_PUBLISHED)
+            ->orderBy('last_reply_at', 'desc')
+            ->first();
+
+        if (!$conversation) {
+            return null;
+        }
+
+        return $conversation->threads()
+            ->orderBy('created_at', 'desc')
+            ->first();
+    }
+
+    /**
+     * Strip outbound SMS confirmation boilerplate, keeping only the actual message.
+     *
+     * Gateway confirmations look like:
+     * "Email2SMS Reply From Allen Bolderoff:between 10-11 #!This reply was sent from..."
+     * We extract just "between 10-11".
+     */
+    protected function stripSmsConfirmation($body)
+    {
+        if (empty($body)) {
+            return '';
+        }
+
+        // Strip HTML to work with plain text for matching
+        $plain = strip_tags($body);
+        $plain = html_entity_decode($plain, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        if (preg_match('/Email2SMS Reply From [^:]+:(.*?)(?:#!|$)/s', $plain, $matches)) {
+            $message = trim($matches[1]);
+            if (!empty($message)) {
+                return $message;
+            }
+        }
+
+        return $body;
     }
 }
