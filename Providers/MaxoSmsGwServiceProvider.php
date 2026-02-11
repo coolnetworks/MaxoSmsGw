@@ -194,16 +194,19 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
             $plain = strip_tags($body);
             $plain = html_entity_decode($plain, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
+            // Mark outbound confirmations so we can suppress them
             if (preg_match('/Email2SMS Reply From/i', $plain)) {
-                // Outbound confirmation — extract just the sent message
+                $data['_sms_is_confirmation'] = true;
                 $data['body'] = $this->stripSmsConfirmation($body);
             } else {
-                // Inbound SMS — strip gateway HTML boilerplate
                 $data['body'] = $this->stripInboundSmsBody($body);
             }
 
             // Final cleanup pass for any remaining boilerplate
             $data['body'] = $this->cleanSmsBoilerplate($data['body']);
+
+            // Drop all attachments from SMS gateway emails
+            $data['attachments'] = [];
 
             // Thread into existing conversation if FreeScout didn't match headers
             if (empty($data['prev_thread'])) {
@@ -216,6 +219,23 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
 
             return $data;
         }, 20, 1);
+
+        // Suppress outbound confirmation echoes from being saved as threads
+        \Eventy::addFilter('fetch_emails.should_save_thread', function ($shouldSave, $data) {
+            $from = $data['from'] ?? '';
+
+            if (!$this->isFromSmsGateway($from)) {
+                return $shouldSave;
+            }
+
+            // Drop outbound confirmation echoes entirely
+            if (!empty($data['_sms_is_confirmation'])) {
+                \Log::info('MaxoSmsGw: Suppressing outbound confirmation echo from ' . $from);
+                return false;
+            }
+
+            return $shouldSave;
+        }, 20, 2);
 
     }
 

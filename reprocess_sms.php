@@ -129,7 +129,15 @@ $grouped = $conversations->groupBy('customer_email');
 
 $mergeCount = 0;
 $threadsCleaned = 0;
+$threadsDeleted = 0;
+$attachmentsDeleted = 0;
 $conversationsDeleted = 0;
+
+function isConfirmationEcho($body) {
+    $plain = strip_tags($body);
+    $plain = html_entity_decode($plain, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    return (bool) preg_match('/Email2SMS Reply From/i', $plain);
+}
 
 foreach ($grouped as $email => $convs) {
     echo "\n--- $email: " . $convs->count() . " conversation(s) ---\n";
@@ -143,11 +151,9 @@ foreach ($grouped as $email => $convs) {
             $threadCount = $duplicate->threads()->count();
             echo "  Merging conv #{$duplicate->id} ({$threadCount} threads) into #{$primary->id}\n";
 
-            // Move all threads to primary
             App\Thread::where('conversation_id', $duplicate->id)
                 ->update(['conversation_id' => $primary->id]);
 
-            // Soft-delete the duplicate
             $duplicate->state = App\Conversation::STATE_DELETED;
             $duplicate->save();
 
@@ -156,9 +162,32 @@ foreach ($grouped as $email => $convs) {
         }
     }
 
-    // Clean all thread bodies in the primary conversation
+    // Process all threads in the primary conversation
     $threads = $primary->threads()->get();
     foreach ($threads as $thread) {
+        // Delete outbound confirmation echo threads entirely
+        if (isConfirmationEcho($thread->body ?? '')) {
+            // Delete attachments for this thread
+            $thread->attachments()->each(function ($att) {
+                $att->delete();
+            });
+            $thread->delete();
+            $threadsDeleted++;
+            echo "  Thread #{$thread->id} DELETED (confirmation echo)\n";
+            continue;
+        }
+
+        // Delete attachments from remaining threads
+        $attCount = $thread->attachments()->count();
+        if ($attCount > 0) {
+            $thread->attachments()->each(function ($att) {
+                $att->delete();
+            });
+            $attachmentsDeleted += $attCount;
+            echo "  Thread #{$thread->id}: deleted $attCount attachment(s)\n";
+        }
+
+        // Clean thread body
         $oldBody = $thread->body;
         $newBody = cleanSmsBody($oldBody);
 
@@ -184,4 +213,6 @@ foreach ($grouped as $email => $convs) {
 echo "\n=== DONE ===\n";
 echo "Conversations merged: $mergeCount\n";
 echo "Conversations soft-deleted: $conversationsDeleted\n";
+echo "Confirmation echo threads deleted: $threadsDeleted\n";
+echo "Attachments deleted: $attachmentsDeleted\n";
 echo "Threads cleaned: $threadsCleaned\n";
