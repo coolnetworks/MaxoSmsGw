@@ -248,31 +248,42 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
             $domain = self::SMS_DOMAIN;
             echo <<<JS
 (function() {
-    // Disable GPT Pro for SMS gateway conversations
-    var checkSms = function() {
-        var emailEl = document.querySelector('.customer-email, .conv-customer-email');
-        if (!emailEl) return;
-        var email = emailEl.textContent || emailEl.innerText || '';
-        if (email.indexOf('{$domain}') === -1) return;
+    var isSmsConversation = function() {
+        // Check To: field select options
+        var toSelect = document.querySelector('#to');
+        if (toSelect) {
+            var opts = toSelect.options;
+            for (var i = 0; i < opts.length; i++) {
+                if (opts[i].value.indexOf('{$domain}') !== -1) return true;
+            }
+        }
+        // Check change-customer-input data attribute
+        var custInput = document.querySelector('[data-customer_email]');
+        if (custInput && custInput.getAttribute('data-customer_email').indexOf('{$domain}') !== -1) return true;
+        // Check page text for the domain
+        var sidebar = document.querySelector('.conv-sidebar-block');
+        if (sidebar && sidebar.textContent.indexOf('{$domain}') !== -1) return true;
+        return false;
+    };
 
-        // Hide all GPT Pro buttons and answers
-        document.querySelectorAll('.chatgpt-get, .gpt-answer, .gpt-answers, .gpt-panel, [data-toggle="gpt"]').forEach(function(el) {
+    var disableGpt = function() {
+        if (!isSmsConversation()) return;
+        // Hide GPT Pro elements
+        document.querySelectorAll('.gpt, .chatgpt-get').forEach(function(el) {
             el.style.display = 'none';
         });
-
-        // Prevent auto-generate by overriding the flag
+        // Prevent auto-generate
         if (typeof freescoutGPTProData !== 'undefined') {
             freescoutGPTProData.autoGenerate = false;
         }
     };
 
-    // Run on page load and after AJAX navigation
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', checkSms);
-    } else {
-        checkSms();
+    if (typeof jQuery !== 'undefined') {
+        jQuery(function() {
+            setTimeout(disableGpt, 500);
+            jQuery(document).ajaxComplete(function() { setTimeout(disableGpt, 300); });
+        });
     }
-    $(document).ajaxComplete(function() { setTimeout(checkSms, 200); });
 })();
 JS;
         });
