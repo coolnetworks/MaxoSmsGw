@@ -48,6 +48,46 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
             }
         }, 20, 3);
 
+        // Save phone number on SMS customer record and update subject with name
+        \Eventy::addAction('conversation.created_by_customer', function ($conversation, $thread, $customer) {
+            if (!$this->isFromSmsGateway($customer->email ?? '')) {
+                return;
+            }
+            $phone = $this->extractPhoneFromEmail($customer->email);
+            if ($phone && empty($customer->getPhones())) {
+                $customer->setPhones([['value' => $phone, 'type' => \App\Customer::PHONE_TYPE_MOBILE]]);
+                $customer->save();
+            }
+        }, 21, 3);
+
+        // When a customer name changes, update SMS conversation subjects
+        \Eventy::addAction('customer.updated', function ($customer) {
+            if (!$customer->emails->contains(function ($e) {
+                return $this->isFromSmsGateway($e->email);
+            })) {
+                return;
+            }
+            $smsEmail = $customer->emails->first(function ($e) {
+                return $this->isFromSmsGateway($e->email);
+            });
+            if (!$smsEmail) {
+                return;
+            }
+            $phone = $this->extractPhoneFromEmail($smsEmail->email);
+            $name = $this->getCustomerDisplayName($customer);
+            if (!$phone || !$name || $name === $phone) {
+                return;
+            }
+            // Update subjects that still contain the phone number
+            Conversation::where('customer_email', $smsEmail->email)
+                ->where('subject', 'LIKE', '%' . $phone . '%')
+                ->get()
+                ->each(function ($conv) use ($phone, $name) {
+                    $conv->subject = str_replace($phone, $name, $conv->subject);
+                    $conv->save();
+                });
+        }, 20, 1);
+
         // Also hook into customer reply to prevent auto-replies on replies
         \Eventy::addAction('conversation.customer_replied', function ($conversation, $thread, $customer) {
             if ($this->isFromSmsGateway($customer->email ?? '')) {
@@ -218,6 +258,19 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
                 if ($prev) {
                     $data['prev_thread'] = $prev;
                     \Log::info('MaxoSmsGw: Threading into existing conversation #' . $prev->conversation_id . ' for ' . $from);
+                }
+            }
+
+            // Resolve sender name and update subject
+            $phoneNumber = $this->extractPhoneFromEmail($from);
+            if ($phoneNumber) {
+                $resolvedName = $this->resolveSmsSenderName($phoneNumber, $data['body'] ?? '');
+                if ($resolvedName) {
+                    $subject = $data['subject'] ?? '';
+                    // Replace phone number with name in subject
+                    if (strpos($subject, $phoneNumber) !== false) {
+                        $data['subject'] = str_replace($phoneNumber, $resolvedName, $subject);
+                    }
                 }
             }
 
@@ -736,5 +789,116 @@ JS;
         $text = preg_replace('/\n{3,}/', "\n\n", $text);
 
         return trim($text);
+    }
+
+    /**
+     * Extract the phone number from an SMS gateway email address.
+     * e.g. "0448484898@sms.voipportal.com.au" => "0448484898"
+     * Returns null if the local part is not a phone number.
+     */
+    protected function extractPhoneFromEmail($email)
+    {
+        if (empty($email)) {
+            return null;
+        }
+        $local = explode('@', $email)[0] ?? '';
+        // Only return if it looks like a phone number (all digits, 8+ chars)
+        if (preg_match('/^\d{8,}$/', $local)) {
+            return $local;
+        }
+        return null;
+    }
+
+    /**
+     * Get a display name for a customer, or null if they only have a phone number.
+     */
+    protected function getCustomerDisplayName($customer)
+    {
+        $first = trim($customer->first_name ?? '');
+        $last = trim($customer->last_name ?? '');
+
+        // Ignore "SMS" placeholder first names
+        if (strcasecmp($first, 'SMS') === 0) {
+            $first = '';
+        }
+
+        // Ignore last names that are just phone numbers
+        if (preg_match('/^\d{8,}$/', $last)) {
+            $last = '';
+        }
+
+        $name = trim($first . ' ' . $last);
+        return !empty($name) ? $name : null;
+    }
+
+    /**
+     * Try to resolve a human name for an SMS phone number.
+     *
+     * 1. Check if the existing SMS customer has been manually named
+     * 2. Search other customers' phone records for a match
+     * 3. Try to extract a name from the message body
+     */
+    protected function resolveSmsSenderName($phoneNumber, $messageBody = '')
+    {
+        // 1. Check the existing SMS customer record
+        $smsEmail = $phoneNumber . '@' . self::SMS_DOMAIN;
+        $emailRecord = \App\Email::where('email', $smsEmail)->first();
+        if ($emailRecord && $emailRecord->customer) {
+            $name = $this->getCustomerDisplayName($emailRecord->customer);
+            if ($name) {
+                return $name;
+            }
+        }
+
+        // 2. Search other customers by phone number
+        $normalized = ltrim($phoneNumber, '0');
+        $customers = \App\Customer::where('phones', 'LIKE', '%' . $normalized . '%')->get();
+        foreach ($customers as $customer) {
+            foreach ($customer->getPhones() as $phone) {
+                $phoneVal = preg_replace('/[^0-9]/', '', $phone['value'] ?? '');
+                if (substr($phoneVal, -strlen($normalized)) === $normalized || substr($normalized, -strlen($phoneVal)) === $phoneVal) {
+                    $name = $this->getCustomerDisplayName($customer);
+                    if ($name) {
+                        // Copy the name to the SMS customer record
+                        if ($emailRecord && $emailRecord->customer) {
+                            $smsCustomer = $emailRecord->customer;
+                            $smsCustomer->first_name = $customer->first_name;
+                            $smsCustomer->last_name = $customer->last_name;
+                            $smsCustomer->save();
+                        }
+                        return $name;
+                    }
+                }
+            }
+        }
+
+        // 3. Try to extract a name from the message body
+        $plain = strip_tags($messageBody);
+        $plain = html_entity_decode($plain, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $namePatterns = [
+            '/\b(?:this is|it\'?s|my name is|i\'?m)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/i',
+            '/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+here\b/i',
+            '/\bcheers,?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*$/im',
+            '/\bthanks,?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*$/im',
+            '/\bregards,?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*$/im',
+        ];
+        foreach ($namePatterns as $pattern) {
+            if (preg_match($pattern, $plain, $matches)) {
+                $extracted = trim($matches[1]);
+                if (strlen($extracted) >= 2 && strlen($extracted) <= 40) {
+                    // Save the extracted name on the customer record
+                    if ($emailRecord && $emailRecord->customer) {
+                        $parts = explode(' ', $extracted, 2);
+                        $smsCustomer = $emailRecord->customer;
+                        $smsCustomer->first_name = $parts[0];
+                        $smsCustomer->last_name = $parts[1] ?? '';
+                        $smsCustomer->save();
+                    }
+                    return $extracted;
+                }
+            }
+        }
+
+        return null;
     }
 }
