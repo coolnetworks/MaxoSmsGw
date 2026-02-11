@@ -158,8 +158,8 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
 
                 \Log::error('MaxoSmsGw: Final plain text: ' . substr($plainText, 0, 300));
 
-                // Append #! delimiter - SMS provider strips everything after this
-                $plainText = $plainText . "\n#!";
+                // Append blank lines to terminate message for SMS gateway
+                $plainText = $plainText . "\n\n\n\n";
 
                 // Set body as plain text only
                 $swiftmessage->setBody($plainText, 'text/plain');
@@ -281,8 +281,8 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
 
                 \Log::error('MaxoSmsGw: Stripped content: ' . substr($plainText, 0, 200));
 
-                // Append #! delimiter - SMS provider strips everything after this
-                $plainText = $plainText . "\n#!";
+                // Append blank lines to terminate message for SMS gateway
+                $plainText = $plainText . "\n\n\n\n";
 
                 // Replace the body with plain text only (SwiftMailer)
                 if (method_exists($message, 'setBody')) {
