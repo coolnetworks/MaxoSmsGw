@@ -78,7 +78,7 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
                     $thread->body = $this->stripToPlainText($thread->body);
                 }
                 // Only send the latest reply, not the full thread history
-                return [$threads[0]];
+                return collect([$threads[0]]);
             }
 
             return $threads;
@@ -294,7 +294,8 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
                 return Conversation::where('mailbox_id', $folder->mailbox_id)
                     ->where('customer_email', 'LIKE', '%@' . $smsDomain)
                     ->where('state', Conversation::STATE_PUBLISHED)
-                    ->where('status', '!=', Conversation::STATUS_SPAM);
+                    ->where('status', '!=', Conversation::STATUS_SPAM)
+                    ->orderBy('last_reply_at', 'desc');
             }
 
             // Exclude SMS conversations from all other folder types
