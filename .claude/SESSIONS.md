@@ -41,11 +41,16 @@
 - **Suppressed outbound confirmation echoes**: `fetch_emails.should_save_thread` returns false for "Email2SMS Reply From" emails — no more duplicate threads
 - **Dropped all SMS attachments**: `$data['attachments'] = []` in the data_to_save hook
 - **Reprocessed existing data**: `reprocess_sms.php` — merged 337 duplicate conversations, cleaned ~1,253 thread bodies, deleted 438 attachments
+- **Deduplication**: `dedup_sms.php` — deleted 58 duplicate message threads (confirmation echoes) and 331 duplicate action threads ("marked as Closed" entries from merges)
+- **Disabled GPT Pro on SMS threads**: JS hook detects `sms.voipportal.com.au` in conversation, hides `.gpt` and `.chatgpt-get` elements, sets `autoGenerate = false`
+- **SMS gateway uses 3 blank lines** (not `#!`) to terminate outbound messages
 - **SSH setup**: `~/.ssh/freescout_key` (passphraseless ed25519), `Host freescout` → cn@help.cool.net.au, NOPASSWD sudo for www-data
+- **Sending SMS via CLI**: `SendReplyToCustomer::dispatch($conv, collect([$thread]), $customer)->onQueue("emails")`
 
 ### Key files
 - `Providers/MaxoSmsGwServiceProvider.php` — all module logic
 - `reprocess_sms.php` — one-time migration/cleanup script
+- `dedup_sms.php` — one-time deduplication script
 
 ### Deployment
 ```bash
