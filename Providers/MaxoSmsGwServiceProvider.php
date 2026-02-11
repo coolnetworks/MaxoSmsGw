@@ -498,19 +498,22 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
             return '';
         }
 
-        // Strip HTML to plain text first
-        $plain = strip_tags($body);
+        // Remove <style> blocks and <img> tags before stripping HTML
+        $html = preg_replace('/<style[^>]*>.*?<\/style>/is', '', $body);
+        $html = preg_replace('/<img[^>]*>/is', '', $html);
+
+        $plain = strip_tags($html);
         $plain = html_entity_decode($plain, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
-        // Try to extract message between "XXXX wrote:" and "Reply directly to this email"
-        if (preg_match('/\d+\s+wrote:\s*(.*?)\s*Reply directly to this email/is', $plain, $matches)) {
+        // Try to extract message between "[sender] wrote:" and "Reply directly to this email"
+        if (preg_match('/[\w\d]+\s+wrote:\s*(.*?)\s*Reply directly to this email/is', $plain, $matches)) {
             $message = trim($matches[1]);
             if (!empty($message)) {
                 return $message;
             }
         }
 
-        // Fallback: try to extract between "wrote:" and any gateway footer
+        // Fallback: between "wrote:" and any gateway footer
         if (preg_match('/wrote:\s*(.*?)\s*(?:Reply directly|Sign off your message|SMS replies are charged)/is', $plain, $matches)) {
             $message = trim($matches[1]);
             if (!empty($message)) {
@@ -518,8 +521,8 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
             }
         }
 
-        // Last fallback: strip HTML and clean up, removing known boilerplate lines
-        $plain = preg_replace('/^\s*\d+\s+wrote:\s*$/m', '', $plain);
+        // Last fallback: remove known boilerplate lines
+        $plain = preg_replace('/^.*wrote:\s*$/m', '', $plain);
         $plain = preg_replace('/Reply directly to this email.*$/is', '', $plain);
         $plain = preg_replace('/Sign off your message.*$/is', '', $plain);
         $plain = preg_replace('/SMS replies are charged.*$/is', '', $plain);
@@ -530,6 +533,6 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
             return $plain;
         }
 
-        return strip_tags($body);
+        return trim(strip_tags($html));
     }
 }

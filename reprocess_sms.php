@@ -19,11 +19,15 @@ $smsDomain = 'sms.voipportal.com.au';
 function stripInboundSmsBody($body) {
     if (empty($body)) return '';
 
-    $plain = strip_tags($body);
+    // Remove <style> blocks and <img> tags before stripping HTML
+    $html = preg_replace('/<style[^>]*>.*?<\/style>/is', '', $body);
+    $html = preg_replace('/<img[^>]*>/is', '', $html);
+
+    $plain = strip_tags($html);
     $plain = html_entity_decode($plain, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
-    // Try "XXXX wrote:" ... "Reply directly to this email"
-    if (preg_match('/\d+\s+wrote:\s*(.*?)\s*Reply directly to this email/is', $plain, $m)) {
+    // Try "[sender] wrote:" ... "Reply directly to this email"
+    if (preg_match('/[\w\d]+\s+wrote:\s*(.*?)\s*Reply directly to this email/is', $plain, $m)) {
         $msg = trim($m[1]);
         if (!empty($msg)) return $msg;
     }
@@ -35,14 +39,14 @@ function stripInboundSmsBody($body) {
     }
 
     // Last fallback: remove known boilerplate lines
-    $plain = preg_replace('/^\s*\d+\s+wrote:\s*$/m', '', $plain);
+    $plain = preg_replace('/^.*wrote:\s*$/m', '', $plain);
     $plain = preg_replace('/Reply directly to this email.*$/is', '', $plain);
     $plain = preg_replace('/Sign off your message.*$/is', '', $plain);
     $plain = preg_replace('/SMS replies are charged.*$/is', '', $plain);
     $plain = preg_replace('/\n{3,}/', "\n\n", $plain);
     $plain = trim($plain);
 
-    return !empty($plain) ? $plain : trim(strip_tags($body));
+    return !empty($plain) ? $plain : trim(strip_tags($html));
 }
 
 function stripSmsConfirmation($body) {
