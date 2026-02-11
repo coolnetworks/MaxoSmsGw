@@ -202,6 +202,9 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
                 $data['body'] = $this->stripInboundSmsBody($body);
             }
 
+            // Strip trailing #! delimiter from stored body
+            $data['body'] = preg_replace('/\s*#!\s*$/', '', $data['body']);
+
             // Thread into existing conversation if FreeScout didn't match headers
             if (empty($data['prev_thread'])) {
                 $prev = $this->findExistingSmsThread($from);
