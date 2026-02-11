@@ -19,6 +19,7 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
         $this->registerConfig();
         $this->registerHooks();
         $this->registerMailListener();
+        $this->registerJavascript();
         \Log::info('MaxoSmsGw: Module boot complete, mail listener registered');
     }
 
@@ -236,7 +237,45 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
 
             return $shouldSave;
         }, 20, 2);
+    }
 
+    /**
+     * Disable GPT Pro on SMS gateway conversations.
+     */
+    protected function registerJavascript()
+    {
+        \Eventy::addAction('javascript', function () {
+            $domain = self::SMS_DOMAIN;
+            echo <<<JS
+(function() {
+    // Disable GPT Pro for SMS gateway conversations
+    var checkSms = function() {
+        var emailEl = document.querySelector('.customer-email, .conv-customer-email');
+        if (!emailEl) return;
+        var email = emailEl.textContent || emailEl.innerText || '';
+        if (email.indexOf('{$domain}') === -1) return;
+
+        // Hide all GPT Pro buttons and answers
+        document.querySelectorAll('.chatgpt-get, .gpt-answer, .gpt-answers, .gpt-panel, [data-toggle="gpt"]').forEach(function(el) {
+            el.style.display = 'none';
+        });
+
+        // Prevent auto-generate by overriding the flag
+        if (typeof freescoutGPTProData !== 'undefined') {
+            freescoutGPTProData.autoGenerate = false;
+        }
+    };
+
+    // Run on page load and after AJAX navigation
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', checkSms);
+    } else {
+        checkSms();
+    }
+    $(document).ajaxComplete(function() { setTimeout(checkSms, 200); });
+})();
+JS;
+        });
     }
 
     /**
