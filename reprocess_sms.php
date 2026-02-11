@@ -4,8 +4,13 @@
  * 1. Merge multiple conversations per phone number into one
  * 2. Strip all thread bodies (gateway HTML, confirmation boilerplate, #!)
  *
- * Run via: cd /var/www/html && sudo -n -u www-data php artisan tinker < Modules/MaxoSmsGw/reprocess_sms.php
+ * Run via: cd /var/www/html && sudo -n -u www-data php Modules/MaxoSmsGw/reprocess_sms.php
  */
+
+// Bootstrap Laravel
+require __DIR__ . '/../../bootstrap/autoload.php';
+$app = require __DIR__ . '/../../bootstrap/app.php';
+$app->make('Illuminate\Contracts\Console\Kernel')->bootstrap();
 
 $smsDomain = 'sms.voipportal.com.au';
 
