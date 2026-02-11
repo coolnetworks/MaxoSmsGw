@@ -63,6 +63,39 @@ function stripSmsConfirmation($body) {
     return $body;
 }
 
+function cleanSmsBoilerplate($text) {
+    if (empty($text)) return '';
+
+    // Remove CSS rules that leaked through
+    $text = preg_replace('/[a-z,\s]*\{[^}]*\}\s*/i', '', $text);
+
+    // Remove "-- Please reply above this line --" and everything after
+    $text = preg_replace('/\s*-+\s*Please reply above this line\s*-+.*$/is', '', $text);
+
+    // Remove "This reply was sent from ... to ..." and everything after
+    $text = preg_replace('/\s*This reply was sent from\b.*$/is', '', $text);
+
+    // Remove "Reply directly to this email" and everything after
+    $text = preg_replace('/\s*Reply directly to this email.*$/is', '', $text);
+
+    // Remove "Sign off your message with #!" and everything after
+    $text = preg_replace('/\s*Sign off your message.*$/is', '', $text);
+
+    // Remove "SMS replies are charged" and everything after
+    $text = preg_replace('/\s*SMS replies are charged.*$/is', '', $text);
+
+    // Remove "From: ... Sent: ..." quoted reply headers
+    $text = preg_replace('/\s*From:\s+.*?\s+Sent:\s+.*$/is', '', $text);
+
+    // Strip trailing #!
+    $text = preg_replace('/\s*#!\s*$/', '', $text);
+
+    // Clean up whitespace
+    $text = preg_replace('/\n{3,}/', "\n\n", $text);
+
+    return trim($text);
+}
+
 function cleanSmsBody($body) {
     if (empty($body)) return '';
 
@@ -76,10 +109,8 @@ function cleanSmsBody($body) {
         $cleaned = stripInboundSmsBody($body);
     }
 
-    // Strip trailing #!
-    $cleaned = preg_replace('/\s*#!\s*$/', '', $cleaned);
-
-    return trim($cleaned);
+    // Final cleanup pass
+    return cleanSmsBoilerplate($cleaned);
 }
 
 // --- Main processing ---
