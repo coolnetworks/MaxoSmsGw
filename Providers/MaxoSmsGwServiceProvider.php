@@ -354,7 +354,7 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
         return false;
     };
 
-    var disableGpt = function() {
+    var tweakSmsView = function() {
         if (!isSmsConversation()) return;
         // Hide GPT Pro elements
         document.querySelectorAll('.gpt, .chatgpt-get').forEach(function(el) {
@@ -364,12 +364,16 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
         if (typeof freescoutGPTProData !== 'undefined') {
             freescoutGPTProData.autoGenerate = false;
         }
+        // Hide status change lineitems (Closed, Assigned, etc.)
+        document.querySelectorAll('.thread-type-lineitem').forEach(function(el) {
+            el.style.display = 'none';
+        });
     };
 
     if (typeof jQuery !== 'undefined') {
         jQuery(function() {
-            setTimeout(disableGpt, 500);
-            jQuery(document).ajaxComplete(function() { setTimeout(disableGpt, 300); });
+            setTimeout(tweakSmsView, 500);
+            jQuery(document).ajaxComplete(function() { setTimeout(tweakSmsView, 300); });
         });
     }
 })();
