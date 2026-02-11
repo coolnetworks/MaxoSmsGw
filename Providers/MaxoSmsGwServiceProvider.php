@@ -12,14 +12,17 @@ define('MAXOSMSGW_MODULE', 'maxosmsgw');
 class MaxoSmsGwServiceProvider extends ServiceProvider
 {
     const SMS_DOMAIN = 'sms.voipportal.com.au';
+    const FOLDER_TYPE_SMS = 120;
 
     public function boot()
     {
         \Log::info('MaxoSmsGw: Module booting...');
         $this->registerConfig();
         $this->registerHooks();
+        $this->registerFolderHooks();
         $this->registerMailListener();
         $this->registerJavascript();
+        $this->ensureSmsFolders();
         \Log::info('MaxoSmsGw: Module boot complete, mail listener registered');
     }
 
@@ -236,6 +239,90 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
             }
 
             return $shouldSave;
+        }, 20, 2);
+    }
+
+    protected function ensureSmsFolders()
+    {
+        try {
+            $mailboxes = \App\Mailbox::all();
+            foreach ($mailboxes as $mailbox) {
+                $exists = \App\Folder::where('mailbox_id', $mailbox->id)
+                    ->where('type', self::FOLDER_TYPE_SMS)
+                    ->exists();
+                if (!$exists) {
+                    $folder = new \App\Folder();
+                    $folder->mailbox_id = $mailbox->id;
+                    $folder->type = self::FOLDER_TYPE_SMS;
+                    $folder->save();
+                }
+            }
+        } catch (\Exception $e) {
+            // Table might not exist during install/migration
+        }
+    }
+
+    protected function registerFolderHooks()
+    {
+        // Register SMS as a public folder type so it appears in the sidebar
+        \Eventy::addFilter('mailbox.folders.public_types', function ($list) {
+            $list[] = self::FOLDER_TYPE_SMS;
+            return $list;
+        }, 20, 1);
+
+        // Set the folder display name
+        \Eventy::addFilter('folder.type_name', function ($name, $folder) {
+            if ($folder->type == self::FOLDER_TYPE_SMS) {
+                return 'SMS';
+            }
+            return $name;
+        }, 20, 2);
+
+        // Set the folder icon
+        \Eventy::addFilter('folder.type_icon', function ($icon, $folder) {
+            if ($folder->type == self::FOLDER_TYPE_SMS) {
+                return 'earphone';
+            }
+            return $icon;
+        }, 20, 2);
+
+        // Build the query for the SMS folder, and exclude SMS from all other folders
+        \Eventy::addFilter('folder.conversations_query', function ($query, $folder, $user_id) {
+            $smsDomain = self::SMS_DOMAIN;
+
+            if ($folder->type == self::FOLDER_TYPE_SMS) {
+                return Conversation::where('mailbox_id', $folder->mailbox_id)
+                    ->where('customer_email', 'LIKE', '%@' . $smsDomain)
+                    ->where('state', Conversation::STATE_PUBLISHED)
+                    ->where('status', '!=', Conversation::STATUS_SPAM);
+            }
+
+            // Exclude SMS conversations from all other folder types
+            return $query->where('customer_email', 'NOT LIKE', '%@' . $smsDomain);
+        }, 20, 3);
+
+        // Custom counter updates for the SMS folder
+        \Eventy::addFilter('folder.update_counters', function ($updated, $folder) {
+            if ($folder->type != self::FOLDER_TYPE_SMS) {
+                return $updated;
+            }
+
+            $smsDomain = self::SMS_DOMAIN;
+
+            $folder->active_count = Conversation::where('mailbox_id', $folder->mailbox_id)
+                ->where('customer_email', 'LIKE', '%@' . $smsDomain)
+                ->where('state', Conversation::STATE_PUBLISHED)
+                ->whereIn('status', [Conversation::STATUS_ACTIVE, Conversation::STATUS_PENDING])
+                ->count();
+
+            $folder->total_count = Conversation::where('mailbox_id', $folder->mailbox_id)
+                ->where('customer_email', 'LIKE', '%@' . $smsDomain)
+                ->where('state', Conversation::STATE_PUBLISHED)
+                ->where('status', '!=', Conversation::STATUS_SPAM)
+                ->count();
+
+            $folder->save();
+            return true;
         }, 20, 2);
     }
 
