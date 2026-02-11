@@ -180,7 +180,7 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
             }
         }, 20, 4);
 
-        // Thread SMS conversations and strip confirmation boilerplate
+        // Thread SMS conversations and strip gateway boilerplate
         \Eventy::addFilter('fetch_emails.data_to_save', function ($data) {
             $from = $data['from'] ?? '';
 
@@ -188,8 +188,19 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
                 return $data;
             }
 
-            // Strip outbound confirmation boilerplate
-            $data['body'] = $this->stripSmsConfirmation($data['body'] ?? '');
+            $body = $data['body'] ?? '';
+
+            // Determine direction and strip accordingly
+            $plain = strip_tags($body);
+            $plain = html_entity_decode($plain, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+            if (preg_match('/Email2SMS Reply From/i', $plain)) {
+                // Outbound confirmation — extract just the sent message
+                $data['body'] = $this->stripSmsConfirmation($body);
+            } else {
+                // Inbound SMS — strip gateway HTML boilerplate
+                $data['body'] = $this->stripInboundSmsBody($body);
+            }
 
             // Thread into existing conversation if FreeScout didn't match headers
             if (empty($data['prev_thread'])) {
@@ -464,5 +475,58 @@ class MaxoSmsGwServiceProvider extends ServiceProvider
         }
 
         return $body;
+    }
+
+    /**
+     * Strip inbound SMS gateway HTML boilerplate.
+     *
+     * Inbound SMS from the gateway arrives wrapped in HTML like:
+     *   <style>...</style>
+     *   <img src="logo.png">
+     *   0407617796 wrote:
+     *   <actual message>
+     *   Reply directly to this email to send an SMS Reply to 0407617796...
+     *
+     * We extract just the actual message text.
+     */
+    protected function stripInboundSmsBody($body)
+    {
+        if (empty($body)) {
+            return '';
+        }
+
+        // Strip HTML to plain text first
+        $plain = strip_tags($body);
+        $plain = html_entity_decode($plain, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        // Try to extract message between "XXXX wrote:" and "Reply directly to this email"
+        if (preg_match('/\d+\s+wrote:\s*(.*?)\s*Reply directly to this email/is', $plain, $matches)) {
+            $message = trim($matches[1]);
+            if (!empty($message)) {
+                return $message;
+            }
+        }
+
+        // Fallback: try to extract between "wrote:" and any gateway footer
+        if (preg_match('/wrote:\s*(.*?)\s*(?:Reply directly|Sign off your message|SMS replies are charged)/is', $plain, $matches)) {
+            $message = trim($matches[1]);
+            if (!empty($message)) {
+                return $message;
+            }
+        }
+
+        // Last fallback: strip HTML and clean up, removing known boilerplate lines
+        $plain = preg_replace('/^\s*\d+\s+wrote:\s*$/m', '', $plain);
+        $plain = preg_replace('/Reply directly to this email.*$/is', '', $plain);
+        $plain = preg_replace('/Sign off your message.*$/is', '', $plain);
+        $plain = preg_replace('/SMS replies are charged.*$/is', '', $plain);
+        $plain = preg_replace('/\n{3,}/', "\n\n", $plain);
+        $plain = trim($plain);
+
+        if (!empty($plain)) {
+            return $plain;
+        }
+
+        return strip_tags($body);
     }
 }
